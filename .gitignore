@@ -1,0 +1,14 @@
+.env
+*.cfg
+__pycache__
+Include
+Lib
+Scripts
+HEAD
+config
+description
+hooks
+info
+.vscode
+etc
+share
