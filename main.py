@@ -17,6 +17,7 @@ import random
 import hashlib
 import pickle
 import shutil
+import re
 
 load_dotenv()
 
@@ -105,6 +106,159 @@ def clear_old_cache(max_age_hours=24):
             except:
                 # If we can't read the cache file, remove it
                 shutil.rmtree(cache_path)
+
+def copy_to_clipboard_js(text, button_id):
+    """Generate JavaScript code to copy text to clipboard"""
+    return f"""
+    <script>
+    function copyToClipboard_{button_id}() {{
+        navigator.clipboard.writeText(`{text}`).then(function() {{
+            document.getElementById('copy_btn_{button_id}').innerHTML = '✅ Copied!';
+            setTimeout(function() {{
+                document.getElementById('copy_btn_{button_id}').innerHTML = '📋 Copy';
+            }}, 2000);
+        }});
+    }}
+    </script>
+    <button id='copy_btn_{button_id}' onclick='copyToClipboard_{button_id}()' 
+            style='background: #f0f2f6; border: 1px solid #d0d0d0; border-radius: 4px; 
+                   padding: 4px 8px; font-size: 12px; cursor: pointer; float: right;'>
+        📋 Copy
+    </button>
+    """
+
+def parse_and_display_response(response_text):
+    """Parse response and display with ChatGPT-like copy functionality"""
+    # Split response into parts (text and code blocks)
+    parts = re.split(r'```(\w*)\n?(.*?)```', response_text, flags=re.DOTALL)
+    code_blocks = []
+    
+    # First pass: collect all code blocks
+    for i, part in enumerate(parts):
+        if i % 3 == 2:  # Code block content
+            language = parts[i-1] if parts[i-1] else "text"
+            code_blocks.append((language, part.strip()))
+    
+    # Second pass: display content
+    for i, part in enumerate(parts):
+        if i % 3 == 0:  # Regular text
+            if part.strip():
+                st.markdown(part.strip())
+        elif i % 3 == 1:  # Language identifier
+            continue
+        else:  # Code block content
+            language = parts[i-1] if parts[i-1] else "text"
+            code_content = part.strip()
+            
+            # Create a ChatGPT-style code block container
+            with st.container():
+                # Header with language and copy button
+                header_col1, header_col2 = st.columns([0.7, 0.3])
+                
+                with header_col1:
+                    st.markdown(f"**{language.upper() if language else 'CODE'}**")
+                
+                with header_col2:
+                    # Streamlit button as fallback
+                    copy_key = f"copy_{hash(code_content)}_{i}_{int(time.time())}"
+                    if st.button("📋 Copy", key=copy_key, help=f"Copy {language} code"):
+                        # Show the code in a text area for easy copying
+                        st.text_area(
+                            f"Copy this {language} code:",
+                            value=code_content,
+                            height=min(200, len(code_content.split('\n')) * 20 + 40),
+                            key=f"copy_area_{copy_key}"
+                        )
+                        st.success("✅ Code ready to copy!")
+                
+                # Display the actual code with syntax highlighting
+                st.code(code_content, language=language)
+                
+                # Add a subtle separator
+                st.markdown("---")
+    
+    # If multiple code blocks, show "Copy All Code" button
+    if len(code_blocks) > 1:
+        with st.expander("📋 Copy All Code Blocks", expanded=False):
+            all_code = ""
+            for i, (lang, code) in enumerate(code_blocks, 1):
+                all_code += f"# Block {i}: {lang.upper()}\n{code}\n\n"
+            
+            st.text_area(
+                "All code blocks combined:",
+                value=all_code,
+                height=300,
+                key=f"all_code_{hash(response_text)}"
+            )
+            st.info("💡 Select all text above (Ctrl+A) and copy (Ctrl+C)")
+
+def display_enhanced_answer(answer):
+    """Display answer with ChatGPT-like formatting and copy functionality"""
+    # Add custom CSS for better styling
+    st.markdown("""
+    <style>
+    .code-block-container {
+        background-color: #f6f8fa;
+        border: 1px solid #d0d7de;
+        border-radius: 6px;
+        margin: 10px 0;
+        position: relative;
+    }
+    .code-header {
+        background-color: #f6f8fa;
+        border-bottom: 1px solid #d0d7de;
+        padding: 8px 16px;
+        font-size: 12px;
+        color: #656d76;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+    .copy-button {
+        background: #f6f8fa;
+        border: 1px solid #d0d7de;
+        border-radius: 6px;
+        padding: 5px 12px;
+        font-size: 12px;
+        cursor: pointer;
+        color: #24292f;
+    }
+    .copy-button:hover {
+        background: #f3f4f6;
+        border-color: #8c959f;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+    
+    with st.container():
+        # Check if the answer contains code blocks
+        if '```' in answer:
+            parse_and_display_response(answer)
+        else:
+            # Regular text answer with copy option
+            st.markdown(answer)
+            
+            # Add copy button for entire response using columns instead of expander
+            st.markdown("---")
+            col1, col2 = st.columns([0.7, 0.3])
+            
+            with col1:
+                st.markdown("**📋 Copy Full Response:**")
+            
+            with col2:
+                copy_key = f"copy_full_{hash(answer)}_{time.time()}"
+                if st.button("Show Copy Text", key=copy_key, help="Show text to copy"):
+                    st.session_state[f"show_copy_{copy_key}"] = True
+            
+            # Show copy text area if button was clicked
+            if st.session_state.get(f"show_copy_{copy_key}", False):
+                st.text_area(
+                    "Select all (Ctrl+A) and copy (Ctrl+C):",
+                    value=answer,
+                    height=150,
+                    key=f"full_response_{copy_key}"
+                )
+                st.info("💡 Select all text above and copy to clipboard")
 
 from pydantic import Field, PrivateAttr
 
@@ -229,6 +383,10 @@ def process_repository_fresh(repo_url, repo_name):
             4. Provide detailed, contextual answers based on both the repository content and our ongoing conversation
             5. If you're unsure about something, say "I am not sure"
             6. For follow-up questions, build upon previous answers rather than starting fresh
+            7. IMPORTANT: Format code snippets and commands in markdown code blocks with appropriate language tags
+            8. Use ```bash for terminal commands, ```python for Python code, ```javascript for JS, etc.
+            9. Only put actual runnable commands and code in code blocks, not explanatory text
+            10. Make your responses copy-friendly for developers who need to run commands or use code
 
             Answer:
             '''
@@ -273,6 +431,26 @@ def process_repository_fresh(repo_url, repo_name):
 def main():
     st.title("🚀 Advanced Git Repository Analyzer")
     st.markdown("### AI-Powered Code Analysis with Real-Time Metrics Dashboard")
+    
+    # Add custom CSS for better copy button styling
+    st.markdown("""
+    <style>
+    .copy-button {
+        background-color: #f0f2f6;
+        border: 1px solid #d0d0d0;
+        border-radius: 4px;
+        padding: 2px 6px;
+        font-size: 12px;
+        cursor: pointer;
+    }
+    .copy-button:hover {
+        background-color: #e0e2e6;
+    }
+    .stCode {
+        position: relative;
+    }
+    </style>
+    """, unsafe_allow_html=True)
     
     # Add cache management in sidebar
     with st.sidebar:
@@ -351,6 +529,10 @@ def main():
             4. Provide detailed, contextual answers based on both the repository content and our ongoing conversation
             5. If you're unsure about something, say "I am not sure"
             6. For follow-up questions, build upon previous answers rather than starting fresh
+            7. IMPORTANT: Format code snippets and commands in markdown code blocks with appropriate language tags
+            8. Use ```bash for terminal commands, ```python for Python code, ```javascript for JS, etc.
+            9. Only put actual runnable commands and code in code blocks, not explanatory text
+            10. Make your responses copy-friendly for developers who need to run commands or use code
 
             Answer:
             '''
@@ -430,7 +612,19 @@ def main():
         for i, (q, a) in enumerate(st.session_state.qa_history):
             with st.expander(f"Q{i+1}: {q[:100]}{'...' if len(q) > 100 else ''}", expanded=(i == len(st.session_state.qa_history) - 1)):
                 st.write(f"**Question:** {q}")
-                st.write(f"**Answer:** {a}")
+                
+                # Copy button for question
+                col1, col2 = st.columns([0.9, 0.1])
+                with col2:
+                    if st.button("📋", key=f"copy_q_{i}", help="Copy question"):
+                        st.code(q, language="text")
+                        st.success("Question copied!")
+                
+                st.write(f"**Answer:**")
+                
+                # Enhanced answer display with copy functionality
+                display_enhanced_answer(a)
+                
         st.divider()
 
     if btn or (question_changed and user_question):
@@ -460,9 +654,9 @@ def main():
                 st.session_state.conversation_history = formatted_history
                 st.session_state.conversation_count += 1
                 
-                # Display the new answer immediately
+                # Display the new answer immediately with enhanced formatting
                 st.success("Latest Answer:")
-                st.write(answer)
+                display_enhanced_answer(answer)
                 
                 # Force a rerun to update the conversation history display
                 st.rerun()
