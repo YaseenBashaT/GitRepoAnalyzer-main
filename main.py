@@ -177,9 +177,21 @@ def parse_and_display_response(response_text):
                 # Add a subtle separator
                 st.markdown("---")
     
-    # If multiple code blocks, show "Copy All Code" button
+    # If multiple code blocks, show "Copy All Code" button without expander
     if len(code_blocks) > 1:
-        with st.expander("📋 Copy All Code Blocks", expanded=False):
+        st.markdown("---")
+        col1, col2 = st.columns([0.7, 0.3])
+        
+        with col1:
+            st.markdown("**📋 Copy All Code Blocks:**")
+        
+        with col2:
+            copy_all_key = f"copy_all_{hash(response_text)}_{time.time()}"
+            if st.button("Show All Code", key=copy_all_key, help="Show all code blocks for copying"):
+                st.session_state[f"show_all_{copy_all_key}"] = True
+        
+        # Show all code blocks if button was clicked
+        if st.session_state.get(f"show_all_{copy_all_key}", False):
             all_code = ""
             for i, (lang, code) in enumerate(code_blocks, 1):
                 all_code += f"# Block {i}: {lang.upper()}\n{code}\n\n"
