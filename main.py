@@ -36,7 +36,7 @@ if 'current_question_context' not in st.session_state:
     st.session_state.current_question_context = None
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-model_name = "llama3-70b-8192"  # Latest available model from Groq
+model_name = "llama-3.3-70b-versatile"  # Updated to current supported model
 
 # Create cache directory
 CACHE_DIR = os.path.join(os.getcwd(), "repo_cache")
