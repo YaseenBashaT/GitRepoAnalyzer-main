@@ -10,11 +10,20 @@ from sklearn.metrics.pairwise import cosine_similarity
 
 def clone_git_repo(url, path):
     try:
-        subprocess.run(['git','clone',url,path],check=True)
+        # For Windows, enable long paths and set core.longpaths to true
+        subprocess.run(['git', 'config', '--global', 'core.longpaths', 'true'], check=False)
+        subprocess.run(['git','clone','--config','core.longpaths=true',url,path],check=True)
         return True
     except subprocess.CalledProcessError as ex:
         print(f"failed to clone repo: {ex}")
-        return False
+        # Try with additional flags for Windows compatibility
+        try:
+            print("Retrying with depth=1 to avoid long path issues...")
+            subprocess.run(['git','clone','--depth','1','--config','core.longpaths=true',url,path],check=True)
+            return True
+        except subprocess.CalledProcessError as ex2:
+            print(f"Second clone attempt also failed: {ex2}")
+            return False
     
 def load_and_index_files(repo_path):
     extensions = ['txt', 'md', 'markdown', 'rst', 'py', 'js', 'java', 'c', 'cpp', 'cs', 'go', 'rb', 'php', 'scala', 'html', 'htm', 'xml', 'json', 'yaml', 'yml', 'ini', 'toml', 'cfg', 'conf', 'sh', 'bash', 'css', 'scss', 'sql', 'gitignore', 'dockerignore', 'editorconfig', 'ipynb']

@@ -269,7 +269,8 @@ def process_repository_fresh(repo_url, repo_name):
     st.info("🔄 Cloning and processing repository for the first time...")
     
     with tempfile.TemporaryDirectory() as local_path:
-        if clone_git_repo(repo_url, local_path):
+        clone_success = clone_git_repo(repo_url, local_path)
+        if clone_success:
             index, document, file_type_count, file_names = load_and_index_files(local_path)
             
             if index is None:
@@ -343,7 +344,18 @@ def process_repository_fresh(repo_url, repo_name):
             st.success(f"✅ Repository '{repo_name}' processed and cached successfully!")
             return index, document, file_type_count, file_names, question_context
         else:
-            st.error("Failed to clone repository. Please check the URL and try again.")
+            st.error(f"❌ Failed to clone repository '{repo_name}'. This might be due to:")
+            st.markdown("""
+            - Repository not found or access denied
+            - Very long filenames (common on Windows)  
+            - Network connectivity issues
+            - Private repository requiring authentication
+            
+            **Suggestions:**
+            - Check if the repository URL is correct and public
+            - Try a different repository 
+            - Some repositories with very long filenames may not work on Windows
+            """)
             return None, None, None, None, None
 
 def main():
@@ -497,11 +509,10 @@ def main():
     if processing_key not in st.session_state:
         st.session_state[processing_key] = False
     
-    # Store previous value to check for changes (use separate tracking key)
-    prev_question_key = f"prev_{question_key}"
-    if prev_question_key not in st.session_state:
-        st.session_state[prev_question_key] = ""
-    previous_value = st.session_state[prev_question_key]
+    # Initialize submit counter to track button clicks
+    submit_counter_key = f"submit_count_{repo_name}"
+    if submit_counter_key not in st.session_state:
+        st.session_state[submit_counter_key] = 0
     
     user_question = st.text_input(
         "Ask a question about the repository: (Press Enter or click Submit)",
@@ -513,8 +524,8 @@ def main():
         key=f"submit_button_{repo_name}"
     )
 
-    # Check if either Enter was pressed (text changed) or Submit was clicked
-    question_changed = user_question != previous_value and user_question.strip() != ""
+    # Check if submit button was clicked and we have a question
+    should_process = btn and user_question.strip() != "" and not st.session_state[processing_key]
 
     if user_question.lower() == "exit()":
         st.warning("Session ended")
@@ -533,15 +544,13 @@ def main():
                 
         st.divider()
 
-    # Process question only if submit button clicked OR text changed with non-empty question
-    # Also check that we're not already processing to prevent double submissions
-    if ((btn and user_question.strip()) or (question_changed and user_question.strip())) and not st.session_state[processing_key]:
+    # Process question if submit button clicked with non-empty question and not already processing
+    if should_process:
         # Set processing flag to prevent double submissions
         st.session_state[processing_key] = True
         
-        # Update previous question tracker (don't modify widget key directly)
-        prev_question_key = f"prev_{question_key}"
-        st.session_state[prev_question_key] = user_question
+        # Increment submit counter to track this submission
+        st.session_state[submit_counter_key] += 1
         
         try:
             with st.spinner("Processing your question..."):
