@@ -485,30 +485,32 @@ def main():
     if question_context is None:
         return
 
-    # Create a unique key for this question input
-    question_key = f"question_input_{st.session_state.conversation_count}_{repo_name}"
+    # Create a stable key for this question input (don't change with conversation count)
+    question_key = f"question_input_{repo_name}"
     
     # Initialize the session state for this question if it doesn't exist
     if question_key not in st.session_state:
         st.session_state[question_key] = ""
     
-    # Initialize processing flag to prevent double submissions
-    processing_key = f"processing_{st.session_state.conversation_count}_{repo_name}"
+    # Initialize processing flag to prevent double submissions (use stable key)
+    processing_key = f"processing_{repo_name}"
     if processing_key not in st.session_state:
         st.session_state[processing_key] = False
     
-    # Store previous value to check for changes
-    previous_value = st.session_state[question_key]
+    # Store previous value to check for changes (use separate tracking key)
+    prev_question_key = f"prev_{question_key}"
+    if prev_question_key not in st.session_state:
+        st.session_state[prev_question_key] = ""
+    previous_value = st.session_state[prev_question_key]
     
     user_question = st.text_input(
         "Ask a question about the repository: (Press Enter or click Submit)",
-        key=question_key,
-        value=previous_value  # Use the stored value
+        key=question_key
     )
     
     btn = st.button(
         "Submit",
-        key=f"submit_button_{st.session_state.conversation_count}_{repo_name}"
+        key=f"submit_button_{repo_name}"
     )
 
     # Check if either Enter was pressed (text changed) or Submit was clicked
@@ -537,8 +539,9 @@ def main():
         # Set processing flag to prevent double submissions
         st.session_state[processing_key] = True
         
-        # Update session state immediately to prevent double processing
-        st.session_state[question_key] = user_question
+        # Update previous question tracker (don't modify widget key directly)
+        prev_question_key = f"prev_{question_key}"
+        st.session_state[prev_question_key] = user_question
         
         try:
             with st.spinner("Processing your question..."):
@@ -570,11 +573,8 @@ def main():
                 st.success("Latest Answer:")
                 display_enhanced_answer(answer)
                 
-                # Update the session state to reflect the processed question
-                st.session_state[question_key] = user_question
-                
-                # Force a rerun to update the conversation history display
-                st.rerun()
+                # Reset processing flag after successful processing
+                st.session_state[processing_key] = False
                 
         except Exception as ex:
             # Reset processing flag on error
