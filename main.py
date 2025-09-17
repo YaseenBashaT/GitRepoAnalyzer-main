@@ -107,25 +107,7 @@ def clear_old_cache(max_age_hours=24):
                 # If we can't read the cache file, remove it
                 shutil.rmtree(cache_path)
 
-def copy_to_clipboard_js(text, button_id):
-    """Generate JavaScript code to copy text to clipboard"""
-    return f"""
-    <script>
-    function copyToClipboard_{button_id}() {{
-        navigator.clipboard.writeText(`{text}`).then(function() {{
-            document.getElementById('copy_btn_{button_id}').innerHTML = '✅ Copied!';
-            setTimeout(function() {{
-                document.getElementById('copy_btn_{button_id}').innerHTML = '📋 Copy';
-            }}, 2000);
-        }});
-    }}
-    </script>
-    <button id='copy_btn_{button_id}' onclick='copyToClipboard_{button_id}()' 
-            style='background: #f0f2f6; border: 1px solid #d0d0d0; border-radius: 4px; 
-                   padding: 4px 8px; font-size: 12px; cursor: pointer; float: right;'>
-        📋 Copy
-    </button>
-    """
+# Copy functionality removed - cleaner interface without copy buttons
 
 def parse_and_display_response(response_text):
     """Parse response and display with ChatGPT-like copy functionality"""
@@ -150,26 +132,10 @@ def parse_and_display_response(response_text):
             language = parts[i-1] if parts[i-1] else "text"
             code_content = part.strip()
             
-            # Create a ChatGPT-style code block container
+            # Display code block without copy button
             with st.container():
-                # Header with language and copy button
-                header_col1, header_col2 = st.columns([0.7, 0.3])
-                
-                with header_col1:
-                    st.markdown(f"**{language.upper() if language else 'CODE'}**")
-                
-                with header_col2:
-                    # Streamlit button as fallback
-                    copy_key = f"copy_{hash(code_content)}_{i}_{int(time.time())}"
-                    if st.button("📋 Copy", key=copy_key, help=f"Copy {language} code"):
-                        # Show the code in a text area for easy copying
-                        st.text_area(
-                            f"Copy this {language} code:",
-                            value=code_content,
-                            height=min(200, len(code_content.split('\n')) * 20 + 40),
-                            key=f"copy_area_{copy_key}"
-                        )
-                        st.success("✅ Code ready to copy!")
+                # Header with language only (no copy button)
+                st.markdown(f"**{language.upper() if language else 'CODE'}**")
                 
                 # Display the actual code with syntax highlighting
                 st.code(code_content, language=language)
@@ -177,36 +143,11 @@ def parse_and_display_response(response_text):
                 # Add a subtle separator
                 st.markdown("---")
     
-    # If multiple code blocks, show "Copy All Code" button without expander
-    if len(code_blocks) > 1:
-        st.markdown("---")
-        col1, col2 = st.columns([0.7, 0.3])
-        
-        with col1:
-            st.markdown("**📋 Copy All Code Blocks:**")
-        
-        with col2:
-            copy_all_key = f"copy_all_{hash(response_text)}_{time.time()}"
-            if st.button("Show All Code", key=copy_all_key, help="Show all code blocks for copying"):
-                st.session_state[f"show_all_{copy_all_key}"] = True
-        
-        # Show all code blocks if button was clicked
-        if st.session_state.get(f"show_all_{copy_all_key}", False):
-            all_code = ""
-            for i, (lang, code) in enumerate(code_blocks, 1):
-                all_code += f"# Block {i}: {lang.upper()}\n{code}\n\n"
-            
-            st.text_area(
-                "All code blocks combined:",
-                value=all_code,
-                height=300,
-                key=f"all_code_{hash(response_text)}"
-            )
-            st.info("💡 Select all text above (Ctrl+A) and copy (Ctrl+C)")
+    # Multiple code blocks display - simplified without copy functionality
 
 def display_enhanced_answer(answer):
-    """Display answer with ChatGPT-like formatting and copy functionality"""
-    # Add custom CSS for better styling
+    """Display answer with formatting but no copy functionality"""
+    # Add custom CSS for better styling (keeping visual improvements)
     st.markdown("""
     <style>
     .code-block-container {
@@ -226,19 +167,6 @@ def display_enhanced_answer(answer):
         justify-content: space-between;
         align-items: center;
     }
-    .copy-button {
-        background: #f6f8fa;
-        border: 1px solid #d0d7de;
-        border-radius: 6px;
-        padding: 5px 12px;
-        font-size: 12px;
-        cursor: pointer;
-        color: #24292f;
-    }
-    .copy-button:hover {
-        background: #f3f4f6;
-        border-color: #8c959f;
-    }
     </style>
     """, unsafe_allow_html=True)
     
@@ -247,30 +175,8 @@ def display_enhanced_answer(answer):
         if '```' in answer:
             parse_and_display_response(answer)
         else:
-            # Regular text answer with copy option
+            # Regular text answer without copy option
             st.markdown(answer)
-            
-            # Add copy button for entire response using columns instead of expander
-            st.markdown("---")
-            col1, col2 = st.columns([0.7, 0.3])
-            
-            with col1:
-                st.markdown("**📋 Copy Full Response:**")
-            
-            with col2:
-                copy_key = f"copy_full_{hash(answer)}_{time.time()}"
-                if st.button("Show Copy Text", key=copy_key, help="Show text to copy"):
-                    st.session_state[f"show_copy_{copy_key}"] = True
-            
-            # Show copy text area if button was clicked
-            if st.session_state.get(f"show_copy_{copy_key}", False):
-                st.text_area(
-                    "Select all (Ctrl+A) and copy (Ctrl+C):",
-                    value=answer,
-                    height=150,
-                    key=f"full_response_{copy_key}"
-                )
-                st.info("💡 Select all text above and copy to clipboard")
 
 from pydantic import Field, PrivateAttr
 
@@ -444,20 +350,9 @@ def main():
     st.title("🚀 Advanced Git Repository Analyzer")
     st.markdown("### AI-Powered Code Analysis with Real-Time Metrics Dashboard")
     
-    # Add custom CSS for better copy button styling
+    # Remove custom CSS for copy buttons (keeping only basic styling)
     st.markdown("""
     <style>
-    .copy-button {
-        background-color: #f0f2f6;
-        border: 1px solid #d0d0d0;
-        border-radius: 4px;
-        padding: 2px 6px;
-        font-size: 12px;
-        cursor: pointer;
-    }
-    .copy-button:hover {
-        background-color: #e0e2e6;
-    }
     .stCode {
         position: relative;
     }
@@ -618,23 +513,15 @@ def main():
         st.warning("Session ended")
         return
 
-    # Display conversation history
+    # Display conversation history (without copy buttons)
     if hasattr(st.session_state, 'qa_history') and st.session_state.qa_history:
         st.subheader("💬 Conversation History")
         for i, (q, a) in enumerate(st.session_state.qa_history):
             with st.expander(f"Q{i+1}: {q[:100]}{'...' if len(q) > 100 else ''}", expanded=(i == len(st.session_state.qa_history) - 1)):
                 st.write(f"**Question:** {q}")
-                
-                # Copy button for question
-                col1, col2 = st.columns([0.9, 0.1])
-                with col2:
-                    if st.button("📋", key=f"copy_q_{i}", help="Copy question"):
-                        st.code(q, language="text")
-                        st.success("Question copied!")
-                
                 st.write(f"**Answer:**")
                 
-                # Enhanced answer display with copy functionality
+                # Enhanced answer display without copy functionality
                 display_enhanced_answer(a)
                 
         st.divider()
@@ -666,7 +553,7 @@ def main():
                 st.session_state.conversation_history = formatted_history
                 st.session_state.conversation_count += 1
                 
-                # Display the new answer immediately with enhanced formatting
+                # Display the new answer immediately with enhanced formatting (no copy buttons)
                 st.success("Latest Answer:")
                 display_enhanced_answer(answer)
                 
