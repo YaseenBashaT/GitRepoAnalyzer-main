@@ -492,6 +492,11 @@ def main():
     if question_key not in st.session_state:
         st.session_state[question_key] = ""
     
+    # Initialize processing flag to prevent double submissions
+    processing_key = f"processing_{st.session_state.conversation_count}_{repo_name}"
+    if processing_key not in st.session_state:
+        st.session_state[processing_key] = False
+    
     # Store previous value to check for changes
     previous_value = st.session_state[question_key]
     
@@ -507,7 +512,7 @@ def main():
     )
 
     # Check if either Enter was pressed (text changed) or Submit was clicked
-    question_changed = user_question != previous_value
+    question_changed = user_question != previous_value and user_question.strip() != ""
 
     if user_question.lower() == "exit()":
         st.warning("Session ended")
@@ -526,7 +531,15 @@ def main():
                 
         st.divider()
 
-    if btn or (question_changed and user_question):
+    # Process question only if submit button clicked OR text changed with non-empty question
+    # Also check that we're not already processing to prevent double submissions
+    if ((btn and user_question.strip()) or (question_changed and user_question.strip())) and not st.session_state[processing_key]:
+        # Set processing flag to prevent double submissions
+        st.session_state[processing_key] = True
+        
+        # Update session state immediately to prevent double processing
+        st.session_state[question_key] = user_question
+        
         try:
             with st.spinner("Processing your question..."):
                 user_question = format_questions(user_question)
@@ -557,10 +570,16 @@ def main():
                 st.success("Latest Answer:")
                 display_enhanced_answer(answer)
                 
+                # Update the session state to reflect the processed question
+                st.session_state[question_key] = user_question
+                
                 # Force a rerun to update the conversation history display
                 st.rerun()
                 
         except Exception as ex:
+            # Reset processing flag on error
+            st.session_state[processing_key] = False
+            
             error_message = str(ex)
             print(f"An error occurred: {ex}")  # Log full error to console
             
