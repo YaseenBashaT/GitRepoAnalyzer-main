@@ -18,6 +18,13 @@ import hashlib
 import pickle
 import shutil
 import re
+import git
+from datetime import datetime, timedelta
+import pandas as pd
+from collections import defaultdict, Counter
+import plotly.express as px
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
 load_dotenv()
 
@@ -106,6 +113,340 @@ def clear_old_cache(max_age_hours=24):
             except:
                 # If we can't read the cache file, remove it
                 shutil.rmtree(cache_path)
+
+def analyze_repository_metrics(repo_path):
+    """Comprehensive repository analysis including git history, contributors, etc."""
+    try:
+        repo = git.Repo(repo_path)
+        metrics = {}
+        
+        # Basic repository info
+        metrics['repo_path'] = repo_path
+        metrics['remote_url'] = repo.remotes.origin.url if repo.remotes else "Unknown"
+        metrics['current_branch'] = repo.active_branch.name
+        metrics['total_branches'] = len(list(repo.branches))
+        metrics['total_tags'] = len(list(repo.tags))
+        
+        # Get all commits
+        commits = list(repo.iter_commits('--all'))
+        metrics['total_commits'] = len(commits)
+        
+        # Analyze commit history
+        commit_data = []
+        author_stats = defaultdict(int)
+        daily_commits = defaultdict(int)
+        file_changes = defaultdict(int)
+        
+        for commit in commits[:1000]:  # Limit to last 1000 commits for performance
+            commit_date = datetime.fromtimestamp(commit.committed_date)
+            day_key = commit_date.strftime('%Y-%m-%d')
+            
+            commit_data.append({
+                'hash': commit.hexsha[:8],
+                'author': commit.author.name,
+                'email': commit.author.email,
+                'date': commit_date,
+                'message': commit.message.strip(),
+                'files_changed': len(commit.stats.files)
+            })
+            
+            author_stats[commit.author.name] += 1
+            daily_commits[day_key] += 1
+            
+            # Count file changes
+            for file_path in commit.stats.files:
+                file_changes[file_path] += 1
+        
+        metrics['commit_data'] = commit_data
+        metrics['author_stats'] = dict(author_stats)
+        metrics['daily_commits'] = dict(daily_commits)
+        metrics['file_changes'] = dict(file_changes)
+        metrics['top_contributors'] = dict(sorted(author_stats.items(), key=lambda x: x[1], reverse=True)[:10])
+        
+        # Repository age
+        if commits:
+            first_commit = commits[-1]
+            last_commit = commits[0]
+            first_date = datetime.fromtimestamp(first_commit.committed_date)
+            last_date = datetime.fromtimestamp(last_commit.committed_date)
+            metrics['repo_age_days'] = (last_date - first_date).days
+            metrics['first_commit_date'] = first_date
+            metrics['last_commit_date'] = last_date
+        
+        # File system analysis
+        file_stats = analyze_file_system(repo_path)
+        metrics.update(file_stats)
+        
+        return metrics
+        
+    except Exception as e:
+        st.error(f"Error analyzing repository: {e}")
+        return None
+
+def analyze_file_system(repo_path):
+    """Analyze file system structure and statistics"""
+    file_stats = {
+        'total_files': 0,
+        'total_lines': 0,
+        'file_types': defaultdict(int),
+        'file_sizes': [],
+        'language_stats': defaultdict(int),
+        'largest_files': [],
+        'directory_structure': defaultdict(int)
+    }
+    
+    # Language extensions mapping
+    language_map = {
+        '.py': 'Python',
+        '.js': 'JavaScript',
+        '.jsx': 'JavaScript',
+        '.ts': 'TypeScript',
+        '.tsx': 'TypeScript',
+        '.java': 'Java',
+        '.c': 'C',
+        '.cpp': 'C++',
+        '.cc': 'C++',
+        '.cxx': 'C++',
+        '.cs': 'C#',
+        '.php': 'PHP',
+        '.rb': 'Ruby',
+        '.go': 'Go',
+        '.rs': 'Rust',
+        '.swift': 'Swift',
+        '.kt': 'Kotlin',
+        '.scala': 'Scala',
+        '.r': 'R',
+        '.m': 'Objective-C',
+        '.mm': 'Objective-C++',
+        '.sh': 'Shell',
+        '.bash': 'Bash',
+        '.sql': 'SQL',
+        '.html': 'HTML',
+        '.htm': 'HTML',
+        '.css': 'CSS',
+        '.scss': 'SCSS',
+        '.sass': 'Sass',
+        '.less': 'Less',
+        '.xml': 'XML',
+        '.json': 'JSON',
+        '.yaml': 'YAML',
+        '.yml': 'YAML',
+        '.md': 'Markdown',
+        '.txt': 'Text',
+        '.dockerfile': 'Docker',
+        '.vue': 'Vue',
+        '.svelte': 'Svelte',
+        '.dart': 'Dart',
+        '.lua': 'Lua',
+        '.perl': 'Perl',
+        '.pl': 'Perl'
+    }
+    
+    for root, dirs, files in os.walk(repo_path):
+        # Skip .git directory
+        if '.git' in root:
+            continue
+            
+        # Count directory depth
+        depth = root.replace(repo_path, '').count(os.sep)
+        file_stats['directory_structure'][depth] += len(files)
+        
+        for file in files:
+            file_path = os.path.join(root, file)
+            
+            try:
+                # Get file size
+                file_size = os.path.getsize(file_path)
+                file_stats['file_sizes'].append(file_size)
+                
+                # Get file extension
+                _, ext = os.path.splitext(file)
+                ext = ext.lower()
+                file_stats['file_types'][ext] += 1
+                
+                # Map to language
+                if ext in language_map:
+                    file_stats['language_stats'][language_map[ext]] += 1
+                
+                # Count lines for text files
+                if ext in ['.py', '.js', '.jsx', '.ts', '.tsx', '.java', '.c', '.cpp', '.cs', 
+                          '.php', '.rb', '.go', '.rs', '.swift', '.kt', '.scala', '.r', '.m',
+                          '.sh', '.bash', '.sql', '.html', '.htm', '.css', '.scss', '.xml',
+                          '.json', '.yaml', '.yml', '.md', '.txt']:
+                    try:
+                        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                            lines = len(f.readlines())
+                            file_stats['total_lines'] += lines
+                            
+                            # Track largest files
+                            file_stats['largest_files'].append({
+                                'path': os.path.relpath(file_path, repo_path),
+                                'lines': lines,
+                                'size': file_size
+                            })
+                    except:
+                        pass
+                
+                file_stats['total_files'] += 1
+                
+            except:
+                continue
+    
+    # Sort largest files
+    file_stats['largest_files'] = sorted(
+        file_stats['largest_files'], 
+        key=lambda x: x['lines'], 
+        reverse=True
+    )[:20]
+    
+    # Convert defaultdicts to regular dicts
+    file_stats['file_types'] = dict(file_stats['file_types'])
+    file_stats['language_stats'] = dict(file_stats['language_stats'])
+    file_stats['directory_structure'] = dict(file_stats['directory_structure'])
+    
+    return file_stats
+
+def display_repository_metrics(metrics, repo_name="default"):
+    """Display comprehensive repository metrics dashboard"""
+    st.header("📊 Repository Analytics Dashboard")
+    
+    # Basic Info Section
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.metric("📁 Total Files", f"{metrics['total_files']:,}")
+    with col2:
+        st.metric("📝 Total Lines", f"{metrics['total_lines']:,}")
+    with col3:
+        st.metric("🔀 Total Commits", f"{metrics['total_commits']:,}")
+    with col4:
+        st.metric("👥 Contributors", len(metrics['author_stats']))
+    
+    # Repository Timeline
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.metric("🌱 Repository Age", f"{metrics.get('repo_age_days', 0)} days")
+    with col2:
+        st.metric("🌿 Branches", metrics.get('total_branches', 0))
+    with col3:
+        st.metric("🏷️ Tags", metrics.get('total_tags', 0))
+    
+    # Commit Activity Chart
+    st.subheader("📈 Commit Activity Over Time")
+    if metrics['daily_commits']:
+        dates = list(metrics['daily_commits'].keys())
+        commits = list(metrics['daily_commits'].values())
+        
+        df_commits = pd.DataFrame({
+            'Date': pd.to_datetime(dates),
+            'Commits': commits
+        }).sort_values('Date')
+        
+        fig = px.line(df_commits, x='Date', y='Commits', 
+                      title='Daily Commit Activity',
+                      labels={'Commits': 'Number of Commits'})
+        fig.update_layout(showlegend=False)
+        st.plotly_chart(fig, use_container_width=True, key=f"commit_timeline_{repo_name}")
+    
+    # Contributors Analysis
+    st.subheader("👥 Top Contributors")
+    if metrics['top_contributors']:
+        contributors_df = pd.DataFrame(
+            list(metrics['top_contributors'].items()), 
+            columns=['Contributor', 'Commits']
+        )
+        
+        fig = px.bar(contributors_df.head(10), x='Commits', y='Contributor', 
+                     orientation='h', title='Top 10 Contributors by Commits')
+        fig.update_layout(yaxis={'categoryorder':'total ascending'})
+        st.plotly_chart(fig, use_container_width=True, key=f"contributors_chart_{repo_name}")
+    
+    # Language Distribution
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.subheader("🗣️ Programming Languages")
+        if metrics['language_stats']:
+            lang_df = pd.DataFrame(
+                list(metrics['language_stats'].items()), 
+                columns=['Language', 'Files']
+            )
+            
+            fig = px.pie(lang_df, values='Files', names='Language', 
+                         title='Language Distribution by Files')
+            st.plotly_chart(fig, use_container_width=True, key=f"language_pie_{repo_name}")
+    
+    with col2:
+        st.subheader("📄 File Types")
+        if metrics['file_types']:
+            # Filter out empty extensions and show top 10
+            file_types_filtered = {k: v for k, v in metrics['file_types'].items() if k and v > 0}
+            sorted_types = sorted(file_types_filtered.items(), key=lambda x: x[1], reverse=True)[:10]
+            
+            if sorted_types:
+                types_df = pd.DataFrame(sorted_types, columns=['Extension', 'Count'])
+                
+                fig = px.bar(types_df, x='Extension', y='Count', 
+                             title='Top File Extensions')
+                st.plotly_chart(fig, use_container_width=True, key=f"file_types_chart_{repo_name}")
+    
+    # File Size Analysis
+    st.subheader("📊 File Size Distribution")
+    if metrics['file_sizes']:
+        sizes_mb = [size / (1024 * 1024) for size in metrics['file_sizes']]
+        
+        fig = px.histogram(x=sizes_mb, nbins=50, 
+                          title='File Size Distribution (MB)',
+                          labels={'x': 'File Size (MB)', 'y': 'Count'})
+        st.plotly_chart(fig, use_container_width=True, key=f"file_size_hist_{repo_name}")
+    
+    # Largest Files
+    st.subheader("📄 Largest Files")
+    if metrics['largest_files']:
+        large_files_df = pd.DataFrame(metrics['largest_files'][:10])
+        large_files_df['Size (KB)'] = large_files_df['size'] / 1024
+        
+        st.dataframe(
+            large_files_df[['path', 'lines', 'Size (KB)']].round(2),
+            use_container_width=True
+        )
+    
+    # Recent Commits
+    st.subheader("🕒 Recent Commits")
+    if metrics['commit_data']:
+        recent_commits = metrics['commit_data'][:20]
+        commits_df = pd.DataFrame(recent_commits)
+        commits_df['date'] = pd.to_datetime(commits_df['date'])
+        
+        # Format for display
+        display_df = commits_df[['hash', 'author', 'date', 'message', 'files_changed']].copy()
+        display_df['date'] = display_df['date'].dt.strftime('%Y-%m-%d %H:%M')
+        display_df['message'] = display_df['message'].str[:100] + '...'
+        
+        st.dataframe(display_df, use_container_width=True)
+    
+    # Repository Health Metrics
+    st.subheader("🏥 Repository Health")
+    health_col1, health_col2, health_col3 = st.columns(3)
+    
+    with health_col1:
+        # Calculate commit frequency
+        if metrics.get('repo_age_days', 0) > 0:
+            commit_frequency = metrics['total_commits'] / max(metrics['repo_age_days'], 1)
+            st.metric("📊 Commits/Day", f"{commit_frequency:.2f}")
+        
+    with health_col2:
+        # Calculate average file size
+        if metrics['file_sizes']:
+            avg_size = sum(metrics['file_sizes']) / len(metrics['file_sizes']) / 1024  # KB
+            st.metric("📐 Avg File Size", f"{avg_size:.1f} KB")
+    
+    with health_col3:
+        # Calculate lines per file
+        if metrics['total_files'] > 0:
+            lines_per_file = metrics['total_lines'] / metrics['total_files']
+            st.metric("📄 Lines/File", f"{lines_per_file:.1f}")
 
 # Copy functionality removed - cleaner interface without copy buttons
 
@@ -269,8 +610,7 @@ def process_repository_fresh(repo_url, repo_name):
     st.info("🔄 Cloning and processing repository for the first time...")
     
     with tempfile.TemporaryDirectory() as local_path:
-        clone_success = clone_git_repo(repo_url, local_path)
-        if clone_success:
+        if clone_git_repo(repo_url, local_path):
             index, document, file_type_count, file_names = load_and_index_files(local_path)
             
             if index is None:
@@ -344,18 +684,7 @@ def process_repository_fresh(repo_url, repo_name):
             st.success(f"✅ Repository '{repo_name}' processed and cached successfully!")
             return index, document, file_type_count, file_names, question_context
         else:
-            st.error(f"❌ Failed to clone repository '{repo_name}'. This might be due to:")
-            st.markdown("""
-            - Repository not found or access denied
-            - Very long filenames (common on Windows)  
-            - Network connectivity issues
-            - Private repository requiring authentication
-            
-            **Suggestions:**
-            - Check if the repository URL is correct and public
-            - Try a different repository 
-            - Some repositories with very long filenames may not work on Windows
-            """)
+            st.error("Failed to clone repository. Please check the URL and try again.")
             return None, None, None, None, None
 
 def main():
@@ -402,209 +731,223 @@ def main():
     if not repo_url:  # Skip if no URL is provided
         return
     
+    # Add sub-navigation tabs after repo URL input
+    tab1, tab2 = st.tabs(["📊 Repository Metrics", "💬 AI Chat Analysis"])
+    
     repo_name = repo_url.split("/")[-1]
     
     # Clear old cache files periodically
     clear_old_cache()
     
-    # Check if repository data is already processed and cached
-    if repo_url in st.session_state.cached_repos:
-        # Use cached data
-        cached_data = st.session_state.cached_repos[repo_url]
-        index = cached_data['index']
-        document = cached_data['document']
-        file_type_count = cached_data['file_type_count']
-        file_names = cached_data['file_names']
-        question_context = cached_data['question_context']
-        st.success(f"✅ Repository '{repo_name}' loaded from memory cache!")
+    with tab1:
+        st.header("📊 Repository Analytics Dashboard")
         
-    elif is_repo_cached(repo_url):
-        # Load from disk cache
-        st.info("📂 Loading repository from disk cache...")
-        index, document, file_type_count, file_names = load_repo_cache(repo_url)
+        if st.button("🔍 Analyze Repository Metrics", type="primary"):
+            with st.spinner("🔄 Cloning and analyzing repository..."):
+                with tempfile.TemporaryDirectory() as local_path:
+                    if clone_git_repo(repo_url, local_path):
+                        metrics = analyze_repository_metrics(local_path)
+                        if metrics:
+                            # Store metrics in session state for persistence
+                            st.session_state[f'metrics_{repo_name}'] = metrics
+                            st.success("✅ Repository analysis completed!")
+                        else:
+                            st.error("Failed to analyze repository metrics.")
+                    else:
+                        st.error("Failed to clone repository. Please check the URL.")
         
-        if index is not None:
-            # Create question context
-            llm = GroqLLM()
-            template = '''
-            You are an expert code analyst assistant. You have access to the repository content and our conversation history.
-
-            Repository: {repo_name} ({repo_url})
-            File Types: {file_type_count}
-            Files: {file_names}
-
-            CONVERSATION HISTORY:
-            {conversation_history}
-
-            REPOSITORY CONTENT:
-            {numbered_documents}
-
-            CURRENT QUESTION: {question}
-
-            Instructions:
-            1. Use the conversation history to understand context and references to previous discussions
-            2. When the user asks follow-up questions (like "explain more", "what about X", "how does that work"), refer back to previous answers
-            3. If the user references "it", "that", "this", or "the previous answer", use conversation history for context
-            4. Provide detailed, contextual answers based on both the repository content and our ongoing conversation
-            5. If you're unsure about something, say "I am not sure"
-            6. For follow-up questions, build upon previous answers rather than starting fresh
-            7. IMPORTANT: Format code snippets and commands in markdown code blocks with appropriate language tags
-            8. Use ```bash for terminal commands, ```python for Python code, ```javascript for JS, etc.
-            9. Only put actual runnable commands and code in code blocks, not explanatory text
-            10. Make your responses copy-friendly for developers who need to run commands or use code
-
-            Answer:
-            '''
-
-            prompt = PromptTemplate(
-                template=template,
-                input_variables=["repo_name","repo_url","conversation_history","numbered_documents","question","file_type_count","file_names"]
-            )
-
-            llm_chain = LLMChain(prompt=prompt, llm=llm)
-
-            question_context = QuestionContext(
-                index,
-                document,
-                llm_chain,
-                model_name,
-                repo_name,
-                repo_url,
-                st.session_state.conversation_history,
-                file_type_count,
-                file_names
-            )
-            
-            # Cache in session state for faster access
-            st.session_state.cached_repos[repo_url] = {
-                'index': index,
-                'document': document,
-                'file_type_count': file_type_count,
-                'file_names': file_names,
-                'question_context': question_context
-            }
-            
-            st.success(f"✅ Repository '{repo_name}' loaded from disk cache!")
+        # Display cached metrics if available
+        if f'metrics_{repo_name}' in st.session_state:
+            display_repository_metrics(st.session_state[f'metrics_{repo_name}'], repo_name)
         else:
-            st.error("Failed to load cached data. Will re-process repository...")
-            # Fallback to normal processing
-            index, document, file_type_count, file_names, question_context = process_repository_fresh(repo_url, repo_name)
-    else:
-        # Process repository fresh
-        index, document, file_type_count, file_names, question_context = process_repository_fresh(repo_url, repo_name)
+            st.info("👆 Click the button above to analyze repository metrics")
     
-    # If processing failed, return early
-    if question_context is None:
-        return
-
-    # Create a stable key for this question input (don't change with conversation count)
-    question_key = f"question_input_{repo_name}"
-    
-    # Initialize the session state for this question if it doesn't exist
-    if question_key not in st.session_state:
-        st.session_state[question_key] = ""
-    
-    # Initialize processing flag to prevent double submissions (use stable key)
-    processing_key = f"processing_{repo_name}"
-    if processing_key not in st.session_state:
-        st.session_state[processing_key] = False
-    
-    # Initialize submit counter to track button clicks
-    submit_counter_key = f"submit_count_{repo_name}"
-    if submit_counter_key not in st.session_state:
-        st.session_state[submit_counter_key] = 0
-    
-    user_question = st.text_input(
-        "Ask a question about the repository: (Press Enter or click Submit)",
-        key=question_key
-    )
-    
-    btn = st.button(
-        "Submit",
-        key=f"submit_button_{repo_name}"
-    )
-
-    # Check if submit button was clicked and we have a question
-    should_process = btn and user_question.strip() != "" and not st.session_state[processing_key]
-
-    if user_question.lower() == "exit()":
-        st.warning("Session ended")
-        return
-
-    # Display conversation history (without copy buttons)
-    if hasattr(st.session_state, 'qa_history') and st.session_state.qa_history:
-        st.subheader("💬 Conversation History")
-        for i, (q, a) in enumerate(st.session_state.qa_history):
-            with st.expander(f"Q{i+1}: {q[:100]}{'...' if len(q) > 100 else ''}", expanded=(i == len(st.session_state.qa_history) - 1)):
-                st.write(f"**Question:** {q}")
-                st.write(f"**Answer:**")
-                
-                # Enhanced answer display without copy functionality
-                display_enhanced_answer(a)
-                
-        st.divider()
-
-    # Process question if submit button clicked with non-empty question and not already processing
-    if should_process:
-        # Set processing flag to prevent double submissions
-        st.session_state[processing_key] = True
+    with tab2:
+        st.header("💬 AI-Powered Repository Analysis")
         
-        # Increment submit counter to track this submission
-        st.session_state[submit_counter_key] += 1
-        
-        try:
-            with st.spinner("Processing your question..."):
-                user_question = format_questions(user_question)
-                
-                # Update the question context with current conversation history before asking
-                question_context.conversation_history = st.session_state.conversation_history
-                
-                answer = ask_question(user_question, question_context)
-                
-                # Initialize qa_history if it doesn't exist
-                if 'qa_history' not in st.session_state:
-                    st.session_state.qa_history = []
-                
-                # Add to conversation history
-                st.session_state.qa_history.append((user_question, answer))
-                
-                # Format conversation history for better context
-                formatted_history = ""
-                for i, (q, a) in enumerate(st.session_state.qa_history):
-                    formatted_history += f"===== Previous Conversation {i+1} =====\n"
-                    formatted_history += f"User: {q}\n"
-                    formatted_history += f"Assistant: {a}\n\n"
-                
-                st.session_state.conversation_history = formatted_history
-                st.session_state.conversation_count += 1
-                
-                # Display the new answer immediately with enhanced formatting (no copy buttons)
-                st.success("Latest Answer:")
-                display_enhanced_answer(answer)
-                
-                # Reset processing flag after successful processing
-                st.session_state[processing_key] = False
-                
-        except Exception as ex:
-            # Reset processing flag on error
-            st.session_state[processing_key] = False
+        # Check if repository data is already processed and cached
+        if repo_url in st.session_state.cached_repos:
+            # Use cached data
+            cached_data = st.session_state.cached_repos[repo_url]
+            index = cached_data['index']
+            document = cached_data['document']
+            file_type_count = cached_data['file_type_count']
+            file_names = cached_data['file_names']
+            question_context = cached_data['question_context']
+            st.success(f"✅ Repository '{repo_name}' loaded from memory cache!")
             
-            error_message = str(ex)
-            print(f"An error occurred: {ex}")  # Log full error to console
+        elif is_repo_cached(repo_url):
+            # Load from disk cache
+            st.info("📂 Loading repository from disk cache...")
+            index, document, file_type_count, file_names = load_repo_cache(repo_url)
             
-            # Show user-friendly error messages
-            if "503" in error_message or "Service unavailable" in error_message:
-                st.error("AI service is temporarily unavailable. Please try again in a moment.")
-            elif "rate limit" in error_message.lower():
-                st.error("Rate limit reached. Please wait before asking another question.")
-            elif "authentication" in error_message.lower() or "api_key" in error_message.lower():
-                st.error("Authentication issue. Please check your API configuration.")
-            elif "timeout" in error_message.lower():
-                st.error("Request timed out. Please try with a shorter question.")
+            if index is not None:
+                # Create question context
+                llm = GroqLLM()
+                template = '''
+                You are an expert code analyst assistant. You have access to the repository content and our conversation history.
+
+                Repository: {repo_name} ({repo_url})
+                File Types: {file_type_count}
+                Files: {file_names}
+
+                CONVERSATION HISTORY:
+                {conversation_history}
+
+                REPOSITORY CONTENT:
+                {numbered_documents}
+
+                CURRENT QUESTION: {question}
+
+                Instructions:
+                1. Use the conversation history to understand context and references to previous discussions
+                2. When the user asks follow-up questions (like "explain more", "what about X", "how does that work"), refer back to previous answers
+                3. If the user references "it", "that", "this", or "the previous answer", use conversation history for context
+                4. Provide detailed, contextual answers based on both the repository content and our ongoing conversation
+                5. If you're unsure about something, say "I am not sure"
+                6. For follow-up questions, build upon previous answers rather than starting fresh
+                7. IMPORTANT: Format code snippets and commands in markdown code blocks with appropriate language tags
+                8. Use ```bash for terminal commands, ```python for Python code, ```javascript for JS, etc.
+                9. Only put actual runnable commands and code in code blocks, not explanatory text
+                10. Make your responses copy-friendly for developers who need to run commands or use code
+
+                Answer:
+                '''
+
+                prompt = PromptTemplate(
+                    template=template,
+                    input_variables=["repo_name","repo_url","conversation_history","numbered_documents","question","file_type_count","file_names"]
+                )
+
+                llm_chain = LLMChain(prompt=prompt, llm=llm)
+
+                question_context = QuestionContext(
+                    index,
+                    document,
+                    llm_chain,
+                    model_name,
+                    repo_name,
+                    repo_url,
+                    st.session_state.conversation_history,
+                    file_type_count,
+                    file_names
+                )
+                
+                # Cache in session state for faster access
+                st.session_state.cached_repos[repo_url] = {
+                    'index': index,
+                    'document': document,
+                    'file_type_count': file_type_count,
+                    'file_names': file_names,
+                    'question_context': question_context
+                }
+                
+                st.success(f"✅ Repository '{repo_name}' loaded from disk cache!")
             else:
-                st.error("Something went wrong. Please try again or rephrase your question.")
-            
-            st.session_state.conversation_count += 1  # Increment counter even on error
+                st.error("Failed to load cached data. Will re-process repository...")
+                # Fallback to normal processing
+                index, document, file_type_count, file_names, question_context = process_repository_fresh(repo_url, repo_name)
+        else:
+            # Process repository fresh
+            index, document, file_type_count, file_names, question_context = process_repository_fresh(repo_url, repo_name)
+        
+        # If processing failed, return early
+        if 'question_context' not in locals() or question_context is None:
+            st.error("Please load repository data first.")
+            return
+
+        # Create a unique key for this question input
+        question_key = f"question_input_{st.session_state.conversation_count}_{repo_name}"
+        
+        # Initialize the session state for this question if it doesn't exist
+        if question_key not in st.session_state:
+            st.session_state[question_key] = ""
+        
+        # Store previous value to check for changes
+        previous_value = st.session_state[question_key]
+        
+        user_question = st.text_input(
+            "Ask a question about the repository: (Press Enter or click Submit)",
+            key=question_key,
+            value=previous_value  # Use the stored value
+        )
+        
+        btn = st.button(
+            "Submit",
+            key=f"submit_button_{st.session_state.conversation_count}_{repo_name}"
+        )
+
+        # Check if either Enter was pressed (text changed) or Submit was clicked
+        question_changed = user_question != previous_value
+
+        if user_question.lower() == "exit()":
+            st.warning("Session ended")
+            return
+
+        # Display conversation history (without copy buttons)
+        if hasattr(st.session_state, 'qa_history') and st.session_state.qa_history:
+            st.subheader("💬 Conversation History")
+            for i, (q, a) in enumerate(st.session_state.qa_history):
+                with st.expander(f"Q{i+1}: {q[:100]}{'...' if len(q) > 100 else ''}", expanded=(i == len(st.session_state.qa_history) - 1)):
+                    st.write(f"**Question:** {q}")
+                    st.write(f"**Answer:**")
+                    
+                    # Enhanced answer display without copy functionality
+                    display_enhanced_answer(a)
+                    
+            st.divider()
+
+        if btn or (question_changed and user_question):
+            try:
+                with st.spinner("Processing your question..."):
+                    user_question = format_questions(user_question)
+                    
+                    # Update the question context with current conversation history before asking
+                    question_context.conversation_history = st.session_state.conversation_history
+                    
+                    answer = ask_question(user_question, question_context)
+                    
+                    # Initialize qa_history if it doesn't exist
+                    if 'qa_history' not in st.session_state:
+                        st.session_state.qa_history = []
+                    
+                    # Add to conversation history
+                    st.session_state.qa_history.append((user_question, answer))
+                    
+                    # Format conversation history for better context
+                    formatted_history = ""
+                    for i, (q, a) in enumerate(st.session_state.qa_history):
+                        formatted_history += f"===== Previous Conversation {i+1} =====\n"
+                        formatted_history += f"User: {q}\n"
+                        formatted_history += f"Assistant: {a}\n\n"
+                    
+                    st.session_state.conversation_history = formatted_history
+                    st.session_state.conversation_count += 1
+                    
+                    # Display the new answer immediately with enhanced formatting (no copy buttons)
+                    st.success("Latest Answer:")
+                    display_enhanced_answer(answer)
+                    
+                    # Force a rerun to update the conversation history display
+                    st.rerun()
+                    
+            except Exception as ex:
+                error_message = str(ex)
+                print(f"An error occurred: {ex}")  # Log full error to console
+                
+                # Show user-friendly error messages
+                if "503" in error_message or "Service unavailable" in error_message:
+                    st.error("AI service is temporarily unavailable. Please try again in a moment.")
+                elif "rate limit" in error_message.lower():
+                    st.error("Rate limit reached. Please wait before asking another question.")
+                elif "authentication" in error_message.lower() or "api_key" in error_message.lower():
+                    st.error("Authentication issue. Please check your API configuration.")
+                elif "timeout" in error_message.lower():
+                    st.error("Request timed out. Please try with a shorter question.")
+                else:
+                    st.error("Something went wrong. Please try again or rephrase your question.")
+                
+                st.session_state.conversation_count += 1  # Increment counter even on error
 
 if __name__ == "__main__":
     main()
