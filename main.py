@@ -117,19 +117,57 @@ def clear_old_cache(max_age_hours=24):
 def analyze_repository_metrics(repo_path):
     """Comprehensive repository analysis including git history, contributors, etc."""
     try:
+        # First check if it's a valid git repository
+        if not os.path.exists(os.path.join(repo_path, '.git')):
+            st.warning("Repository doesn't appear to be a git repository. Analyzing file system only.")
+            # Fall back to file system analysis only
+            file_stats = analyze_file_system(repo_path)
+            file_stats.update({
+                'total_commits': 0,
+                'author_stats': {},
+                'daily_commits': {},
+                'file_changes': {},
+                'top_contributors': {},
+                'commit_data': [],
+                'repo_age_days': 0,
+                'total_branches': 0,
+                'total_tags': 0
+            })
+            return file_stats
+        
         repo = git.Repo(repo_path)
         metrics = {}
         
         # Basic repository info
         metrics['repo_path'] = repo_path
-        metrics['remote_url'] = repo.remotes.origin.url if repo.remotes else "Unknown"
-        metrics['current_branch'] = repo.active_branch.name
-        metrics['total_branches'] = len(list(repo.branches))
-        metrics['total_tags'] = len(list(repo.tags))
+        try:
+            metrics['remote_url'] = repo.remotes.origin.url if repo.remotes else "Unknown"
+        except:
+            metrics['remote_url'] = "Unknown"
+            
+        try:
+            metrics['current_branch'] = repo.active_branch.name
+        except:
+            metrics['current_branch'] = "Unknown"
+            
+        try:
+            metrics['total_branches'] = len(list(repo.branches))
+        except:
+            metrics['total_branches'] = 0
+            
+        try:
+            metrics['total_tags'] = len(list(repo.tags))
+        except:
+            metrics['total_tags'] = 0
         
-        # Get all commits
-        commits = list(repo.iter_commits('--all'))
-        metrics['total_commits'] = len(commits)
+        # Get all commits with error handling
+        try:
+            commits = list(repo.iter_commits('--all', max_count=1000))  # Limit to prevent memory issues
+            metrics['total_commits'] = len(commits)
+        except Exception as e:
+            st.warning(f"Could not access commit history: {e}")
+            commits = []
+            metrics['total_commits'] = 0
         
         # Analyze commit history
         commit_data = []
@@ -137,25 +175,34 @@ def analyze_repository_metrics(repo_path):
         daily_commits = defaultdict(int)
         file_changes = defaultdict(int)
         
-        for commit in commits[:1000]:  # Limit to last 1000 commits for performance
-            commit_date = datetime.fromtimestamp(commit.committed_date)
-            day_key = commit_date.strftime('%Y-%m-%d')
-            
-            commit_data.append({
-                'hash': commit.hexsha[:8],
-                'author': commit.author.name,
-                'email': commit.author.email,
-                'date': commit_date,
-                'message': commit.message.strip(),
-                'files_changed': len(commit.stats.files)
-            })
-            
-            author_stats[commit.author.name] += 1
-            daily_commits[day_key] += 1
-            
-            # Count file changes
-            for file_path in commit.stats.files:
-                file_changes[file_path] += 1
+        for commit in commits:
+            try:
+                commit_date = datetime.fromtimestamp(commit.committed_date)
+                day_key = commit_date.strftime('%Y-%m-%d')
+                
+                commit_data.append({
+                    'hash': commit.hexsha[:8],
+                    'author': commit.author.name,
+                    'email': commit.author.email,
+                    'date': commit_date,
+                    'message': commit.message.strip(),
+                    'files_changed': len(commit.stats.files) if hasattr(commit, 'stats') else 0
+                })
+                
+                author_stats[commit.author.name] += 1
+                daily_commits[day_key] += 1
+                
+                # Count file changes with error handling
+                try:
+                    if hasattr(commit, 'stats'):
+                        for file_path in commit.stats.files:
+                            file_changes[file_path] += 1
+                except:
+                    pass  # Skip file changes if stats are not available
+                    
+            except Exception as e:
+                # Skip problematic commits
+                continue
         
         metrics['commit_data'] = commit_data
         metrics['author_stats'] = dict(author_stats)
@@ -165,13 +212,18 @@ def analyze_repository_metrics(repo_path):
         
         # Repository age
         if commits:
-            first_commit = commits[-1]
-            last_commit = commits[0]
-            first_date = datetime.fromtimestamp(first_commit.committed_date)
-            last_date = datetime.fromtimestamp(last_commit.committed_date)
-            metrics['repo_age_days'] = (last_date - first_date).days
-            metrics['first_commit_date'] = first_date
-            metrics['last_commit_date'] = last_date
+            try:
+                first_commit = commits[-1]
+                last_commit = commits[0]
+                first_date = datetime.fromtimestamp(first_commit.committed_date)
+                last_date = datetime.fromtimestamp(last_commit.committed_date)
+                metrics['repo_age_days'] = (last_date - first_date).days
+                metrics['first_commit_date'] = first_date
+                metrics['last_commit_date'] = last_date
+            except:
+                metrics['repo_age_days'] = 0
+        else:
+            metrics['repo_age_days'] = 0
         
         # File system analysis
         file_stats = analyze_file_system(repo_path)
@@ -179,9 +231,44 @@ def analyze_repository_metrics(repo_path):
         
         return metrics
         
+    except git.exc.InvalidGitRepositoryError:
+        st.warning("Invalid git repository. Analyzing file system only.")
+        # Fall back to file system analysis
+        file_stats = analyze_file_system(repo_path)
+        file_stats.update({
+            'total_commits': 0,
+            'author_stats': {},
+            'daily_commits': {},
+            'file_changes': {},
+            'top_contributors': {},
+            'commit_data': [],
+            'repo_age_days': 0,
+            'total_branches': 0,
+            'total_tags': 0
+        })
+        return file_stats
     except Exception as e:
         st.error(f"Error analyzing repository: {e}")
-        return None
+        st.info("Falling back to basic file system analysis...")
+        
+        # Fallback to basic file analysis
+        try:
+            file_stats = analyze_file_system(repo_path)
+            file_stats.update({
+                'total_commits': 0,
+                'author_stats': {},
+                'daily_commits': {},
+                'file_changes': {},
+                'top_contributors': {},
+                'commit_data': [],
+                'repo_age_days': 0,
+                'total_branches': 0,
+                'total_tags': 0
+            })
+            return file_stats
+        except Exception as fallback_error:
+            st.error(f"Complete analysis failed: {fallback_error}")
+            return None
 
 def analyze_file_system(repo_path):
     """Analyze file system structure and statistics"""
@@ -334,7 +421,7 @@ def display_repository_metrics(metrics, repo_name="default"):
     
     # Commit Activity Chart
     st.subheader("📈 Commit Activity Over Time")
-    if metrics['daily_commits']:
+    if metrics.get('daily_commits') and len(metrics['daily_commits']) > 0:
         dates = list(metrics['daily_commits'].keys())
         commits = list(metrics['daily_commits'].values())
         
@@ -348,10 +435,12 @@ def display_repository_metrics(metrics, repo_name="default"):
                       labels={'Commits': 'Number of Commits'})
         fig.update_layout(showlegend=False)
         st.plotly_chart(fig, use_container_width=True, key=f"commit_timeline_{repo_name}")
+    else:
+        st.info("📊 No commit data available for timeline analysis")
     
     # Contributors Analysis
     st.subheader("👥 Top Contributors")
-    if metrics['top_contributors']:
+    if metrics.get('top_contributors') and len(metrics['top_contributors']) > 0:
         contributors_df = pd.DataFrame(
             list(metrics['top_contributors'].items()), 
             columns=['Contributor', 'Commits']
@@ -361,13 +450,15 @@ def display_repository_metrics(metrics, repo_name="default"):
                      orientation='h', title='Top 10 Contributors by Commits')
         fig.update_layout(yaxis={'categoryorder':'total ascending'})
         st.plotly_chart(fig, use_container_width=True, key=f"contributors_chart_{repo_name}")
+    else:
+        st.info("👥 No contributor data available")
     
     # Language Distribution
     col1, col2 = st.columns(2)
     
     with col1:
         st.subheader("🗣️ Programming Languages")
-        if metrics['language_stats']:
+        if metrics.get('language_stats') and len(metrics['language_stats']) > 0:
             lang_df = pd.DataFrame(
                 list(metrics['language_stats'].items()), 
                 columns=['Language', 'Files']
@@ -376,10 +467,12 @@ def display_repository_metrics(metrics, repo_name="default"):
             fig = px.pie(lang_df, values='Files', names='Language', 
                          title='Language Distribution by Files')
             st.plotly_chart(fig, use_container_width=True, key=f"language_pie_{repo_name}")
+        else:
+            st.info("🗣️ No programming language data available")
     
     with col2:
         st.subheader("📄 File Types")
-        if metrics['file_types']:
+        if metrics.get('file_types') and len(metrics['file_types']) > 0:
             # Filter out empty extensions and show top 10
             file_types_filtered = {k: v for k, v in metrics['file_types'].items() if k and v > 0}
             sorted_types = sorted(file_types_filtered.items(), key=lambda x: x[1], reverse=True)[:10]
@@ -390,16 +483,22 @@ def display_repository_metrics(metrics, repo_name="default"):
                 fig = px.bar(types_df, x='Extension', y='Count', 
                              title='Top File Extensions')
                 st.plotly_chart(fig, use_container_width=True, key=f"file_types_chart_{repo_name}")
+            else:
+                st.info("📄 No file type data available")
+        else:
+            st.info("📄 No file type data available")
     
     # File Size Analysis
     st.subheader("📊 File Size Distribution")
-    if metrics['file_sizes']:
+    if metrics.get('file_sizes') and len(metrics['file_sizes']) > 0:
         sizes_mb = [size / (1024 * 1024) for size in metrics['file_sizes']]
         
         fig = px.histogram(x=sizes_mb, nbins=50, 
                           title='File Size Distribution (MB)',
                           labels={'x': 'File Size (MB)', 'y': 'Count'})
         st.plotly_chart(fig, use_container_width=True, key=f"file_size_hist_{repo_name}")
+    else:
+        st.info("📊 No file size data available")
     
     # Largest Files
     st.subheader("📄 Largest Files")
