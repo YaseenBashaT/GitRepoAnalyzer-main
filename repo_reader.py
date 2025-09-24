@@ -17,60 +17,107 @@ def clone_git_repo(url, path):
         return False
     
 def load_and_index_files(repo_path):
-    extensions = ['txt', 'md', 'markdown', 'rst', 'py', 'js', 'java', 'c', 'cpp', 'cs', 'go', 'rb', 'php', 'scala', 'html', 'htm', 'xml', 'json', 'yaml', 'yml', 'ini', 'toml', 'cfg', 'conf', 'sh', 'bash', 'css', 'scss', 'sql', 'gitignore', 'dockerignore', 'editorconfig', 'ipynb']
-
+    import glob as glob_module
+    from langchain_core.documents import Document
+    
+    # Define file extensions we want to process
+    extensions = ['txt', 'md', 'markdown', 'rst', 'py', 'js', 'ts', 'jsx', 'tsx', 'java', 'c', 'cpp', 'cs', 'go', 'rb', 'php', 'scala', 'html', 'htm', 'xml', 'json', 'yaml', 'yml', 'ini', 'toml', 'cfg', 'conf', 'sh', 'bash', 'css', 'scss', 'sql', 'vue', 'svelte', 'r', 'R', 'dart', 'kt', 'swift', 'pl', 'lua']
+    
     file_type_counts = {}
     documents_dict = {}
-
-    for ext in extensions:
-        glob_pattern = f'**/*.{ext}'
+    total_processed = 0
+    total_errors = 0
+    
+    def load_file_content(file_path):
+        """Load content from a single file with robust error handling"""
         try:
-            loader = None
-            if ext == 'ipynb':
+            # Skip very large files
+            if os.path.getsize(file_path) > 10 * 1024 * 1024:  # 10MB limit
+                return None
+            
+            # Try different encodings
+            encodings = ['utf-8', 'utf-8-sig', 'latin-1', 'cp1252', 'iso-8859-1']
+            content = None
+            
+            for encoding in encodings:
                 try:
-                    loader = NotebookLoader(str(repo_path), include_outputs=True, max_output_length=20, remove_newline=True)
-                except Exception as e:
-                    print(f"Error loading notebook: {e}")
+                    with open(file_path, 'r', encoding=encoding, errors='ignore') as f:
+                        content = f.read()
+                    break
+                except (UnicodeDecodeError, UnicodeError, PermissionError):
                     continue
-            elif ext == 'json':
-                try:
-                    from langchain_community.document_loaders import JSONLoader
-                    def json_loader_factory(file_path):
-                        return JSONLoader(
-                            file_path=file_path,
-                            jq_schema='.',
-                            text_content=False
-                        )
-                    loader = DirectoryLoader(
-                        repo_path,
-                        glob=glob_pattern,
-                        loader_cls=lambda p: json_loader_factory(p)
-                    )
-                except Exception as e:
-                    print(f"Error loading JSON: {e}")
+                except Exception:
                     continue
-            else:
-                try:
-                    from langchain_community.document_loaders import TextLoader
-                    loader = DirectoryLoader(repo_path, glob=glob_pattern, loader_cls=TextLoader)
-                except Exception as e:
-                    print(f"Error loading text file: {e}")
-                    continue
-
-            loaded_documents = loader.load() if callable(loader.load) else []
-            if loaded_documents:
-                file_type_counts[ext] = len(loaded_documents)
-                for doc in loaded_documents:
-                    file_path = doc.metadata['source']
+            
+            if content is None:
+                return None
+            
+            # Skip empty or very short files
+            if len(content.strip()) < 5:
+                return None
+            
+            # Basic binary detection - skip files with too many null bytes or non-printable chars
+            if '\x00' in content[:1000] or content.count('\x00') > 10:
+                return None
+            
+            # Check if file appears to be text (reasonable ratio of printable characters)
+            sample = content[:2000]  # Check first 2KB
+            if sample:
+                printable_count = sum(1 for c in sample if c.isprintable() or c in '\n\r\t')
+                if printable_count / len(sample) < 0.7:  # Less than 70% printable = likely binary
+                    return None
+            
+            return content
+            
+        except Exception as e:
+            print(f"Error loading file {file_path}: {e}")
+            return None
+    
+    # Process each file extension
+    for ext in extensions:
+        ext_file_count = 0
+        
+        # Find all files with this extension
+        pattern = os.path.join(repo_path, '**', f'*.{ext}')
+        matching_files = glob_module.glob(pattern, recursive=True)
+        
+        for file_path in matching_files:
+            try:
+                # Skip hidden files and directories
+                if any(part.startswith('.') for part in os.path.relpath(file_path, repo_path).split(os.sep)):
+                    if not any(file_path.endswith(f'.{allowed}') for allowed in ['gitignore', 'dockerignore', 'editorconfig']):
+                        continue
+                
+                # Load file content
+                content = load_file_content(file_path)
+                if content is not None:
+                    # Create document
                     relative_path = os.path.relpath(file_path, repo_path)
                     file_id = str(uuid.uuid4())
-                    doc.metadata['source'] = relative_path
-                    doc.metadata['file_id'] = file_id
-
+                    
+                    doc = Document(
+                        page_content=content,
+                        metadata={
+                            "source": relative_path,
+                            "file_id": file_id
+                        }
+                    )
+                    
                     documents_dict[file_id] = doc
-        except Exception as e:
-            print(f"Error loading files with pattern '{glob_pattern}': {e}")
-            continue
+                    ext_file_count += 1
+                    total_processed += 1
+                else:
+                    total_errors += 1
+                    
+            except Exception as e:
+                total_errors += 1
+                continue
+        
+        if ext_file_count > 0:
+            file_type_counts[ext] = ext_file_count
+    
+    print(f"Repository indexing complete: {total_processed} files processed, {total_errors} errors")
+    print(f"File types found: {list(file_type_counts.keys())}")
 
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=3000, chunk_overlap=200)
 

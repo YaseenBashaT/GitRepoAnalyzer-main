@@ -19,15 +19,15 @@ def ask_question(question, context: QuestionContext):
     numbered_document = format_document(relevant_docs)
 
     question_context = f"This question is about the github repo '{context.repo_name}' availabe at {context.repo_url}. The most relevant documents are:\n\n{numbered_document}"
-    answer_with_sources = context.llm_chain.run(
-        model = context.model_name,
-        question =  question,
-        context = question_context,
-        repo_name = context.repo_name,
-        repo_url = context.repo_url,
-        conversation_history = context.conversation_history,
-        numbered_documents = numbered_document,
-        file_type_count = context.file_type_count,
-        file_names = context.filenames
-    )
+    answer_with_sources = context.llm_chain.invoke({
+        "model": context.model_name,
+        "question": question,
+        "context": question_context,
+        "repo_name": context.repo_name,
+        "repo_url": context.repo_url,
+        "conversation_history": context.conversation_history,
+        "numbered_documents": numbered_document,
+        "file_type_count": context.file_type_count,
+        "file_names": context.filenames
+    })
     return answer_with_sources

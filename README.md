@@ -1,4 +1,4 @@
-# Git Repository Analyzer
+# Smart Repository Analyzer
 
 An AI-powered tool that analyzes GitHub repositories and answers questions about their content using the Groq API.
 
@@ -20,10 +20,9 @@ An AI-powered tool that analyzes GitHub repositories and answers questions about
 
 1. Clone this repository:
 ```bash
-git clone https://github.com/yourusername/GitRepoAnalyzer.git
-cd GitRepoAnalyzer
+git clone https://github.com/yourusername/SmartRepositoryAnalyzer.git
+cd SmartRepositoryAnalyzer
 ```
-
 2. Install dependencies:
 ```bash
 pip install -r requirements.txt

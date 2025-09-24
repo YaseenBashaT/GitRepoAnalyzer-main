@@ -11,7 +11,7 @@ import time
 from main import get_repo_hash, get_cache_path, is_repo_cached, save_repo_cache, load_repo_cache, clear_old_cache
 
 def test_cache_functions():
-    print("🧪 Testing GitRepoAnalyzer Caching System")
+    print("🧪 Testing Smart Repository Analyzer Caching System")
     print("=" * 50)
     
     # Test 1: Test hash generation
