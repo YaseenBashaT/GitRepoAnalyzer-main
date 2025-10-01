@@ -13,7 +13,8 @@ def clean_and_tokenize(text):
     text = re.sub(r'\W', ' ', text)
     text = re.sub(r'\d+', '', text)
     text = text.lower()
-    return nltk.word_tokenize(text)
+    # Use simple whitespace-based tokenization instead of NLTK
+    return text.split()
 
 def format_questions(question):
     question = re.sub(r'\s+',' ',question).strip()
